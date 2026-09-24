@@ -399,7 +399,14 @@ Still open:
    GPIO/EXTI ISR and work-item wiring don't exist yet; that's backend/
    sample-app work, not core work.
 
-## REQ-5 vs. real STM32 Stop mode (resolved 2026-09-24)
+## REQ-5 vs. real STM32 Stop mode (parked with REQ-5, 2026-09-24)
+
+**Status:** REQ-5 (CLI-triggered resume) is deferred out of v1 scope
+(Requirements/REQUIREMENTS.md REQ-20), so this design is parked, not
+active. v1 wires only the button (REQ-2/REQ-4) as a trigger source, so
+the RX-EXTI-wake mechanism below is not implemented for v1. Kept here
+because it's still the intended design once REQ-3/REQ-5 come back into
+scope — no rework needed then, just implementation.
 
 **The tension:** real STM32 Stop mode halts the CPU clock entirely,
 including the USART peripheral, so a UART byte cannot be received or

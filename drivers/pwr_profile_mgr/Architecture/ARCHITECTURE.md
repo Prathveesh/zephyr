@@ -59,11 +59,12 @@ or upward: it's a strict one-directional call stack, top to bottom.
 
 **Box 1 — sample app / shell cmds (top).**
 This is not part of the `pwr_profile_mgr` module itself — it's whatever
-calls into it: the shell sample application (the `state_manager
-suspend`/`resume` CLI commands from REQ-3/REQ-5) and, indirectly, the
-button-press path (REQ-2/REQ-4), once it's been deferred from ISR to
-thread context per REQ-15. This box represents *every* external caller
-of the module, not a single component.
+calls into it: the button-press path (REQ-2/REQ-4), once it's been
+deferred from ISR to thread context per REQ-15, and — once REQ-3/REQ-5
+are back in scope (parked for v1, see Requirements/REQUIREMENTS.md
+REQ-20) — the shell sample application's `state_manager suspend`/`resume`
+CLI commands. This box represents *every* external caller of the
+module, not a single component.
 
 **Arrow 1 — `pwr_profile_suspend()` / `resume()` / `get_state()`.**
 This is the module's entire public API (three functions, per

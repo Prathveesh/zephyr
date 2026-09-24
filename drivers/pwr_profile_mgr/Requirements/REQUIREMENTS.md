@@ -112,3 +112,13 @@ Full Zephyr-upstream-quality items — Doxygen-style API documentation,
 Kconfig/Devicetree binding polish — are not required for v1. REQ-15
 (thread-safe trigger handling) is exempt from this exclusion and
 remains mandatory.
+
+**REQ-20 — CLI trigger deferred to a later release.**
+REQ-3 (CLI-triggered suspend) and REQ-5 (CLI-triggered resume) are
+deferred out of v1 scope, parked for a later release. v1 exposes only
+the button-triggered trigger path (REQ-2, REQ-4). This does not change
+REQ-3/REQ-5's own text — they remain the eventual target — and does
+not touch REQ-6 (unified trigger path): the core's `pwr_profile_suspend()`/
+`pwr_profile_resume()` functions are the same regardless of trigger
+source, so adding the CLI trigger later is additive at the backend/
+sample-app layer, not a core change.
