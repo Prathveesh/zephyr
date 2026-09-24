@@ -407,7 +407,7 @@ decoded while the board is actually asleep — REQ-5 ("CLI-triggered
 resume") cannot mean "type `resume` in the shell and have it parsed
 while in Stop mode," taken literally.
 
-**User-confirmed resolution:** the STM32F4 backend configures the debug
+**Resolution:** the STM32F4 backend configures the debug
 USART's RX pin as a plain GPIO/EXTI line — independent of the USART
 peripheral itself, the same mechanism already used for the button
 (EXTI0/PA0, REQ-2/REQ-4) — so any falling edge (the start bit of an
