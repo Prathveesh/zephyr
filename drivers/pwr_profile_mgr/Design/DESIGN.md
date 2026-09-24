@@ -54,8 +54,8 @@ for the full sequencing (phases 0–8).
 
 ### Structs
 
-- `struct pwr_profile_ctx` **(proposed)** — internal state record:
-  current state, fault-latch flag, retry count.
+- `struct pwr_profile_ctx` — internal state record: transient/current
+  state, last stable state, fault-latch flag, retry count.
 
 ### Enums
 
@@ -78,11 +78,12 @@ None exposed. See [Structs](#structs-1) and [Enums](#enums-1).
 
 ### Structs
 
-#### `struct pwr_profile_ctx` (proposed)
+#### `struct pwr_profile_ctx`
 
 ```c
 struct pwr_profile_ctx {
 	enum pwr_profile_state state;
+	enum pwr_profile_state stable_state;
 	bool transition_failed;
 	uint8_t retry_count;
 };
@@ -96,7 +97,13 @@ after retries; `transition_failed` and `retry_count` disambiguate these
 so debuggers, logs and callers can tell them apart:
 
 - `state` — direction of the in-flight or failed transition (suspend vs.
-  resume) when in a transient value.
+  resume) when in a transient value; equal to `stable_state` when idle.
+- `stable_state` — the last state that was fully reached and confirmed
+  stable (`ACTIVE` or `SLEEP` only). This is what
+  `pwr_profile_get_state()` returns, including while a fault is latched
+  in `state` — resolves the "what does `get_state()` return during a
+  fault" question from the code, not by inventing a third externally
+  visible value.
 - `transition_failed` — severity/certainty: `false` = normal in-progress
   or stable; `true` = latched fault, retries exhausted.
 - `retry_count` — attempt history: number of rollback retries made
@@ -105,8 +112,9 @@ so debuggers, logs and callers can tell them apart:
 A heavier parallel fault-reason enum was proposed and explicitly
 rejected in favor of this lightweight form.
 
-Internal to the core. Exposure to callers (e.g. through an extended
-query API) is an open point.
+Internal to the core, not exposed via the public header. Whether/how the
+planned `status` shell subcommand reads `transition_failed` and
+`retry_count` is still open — see [Open points](#open-points) item 6.
 
 **Boundary values:**
 
@@ -195,10 +203,11 @@ enum pwr_profile_state pwr_profile_get_state(void);
 **Description:**
 Returns the current profile state. Named with the `_get_` accessor
 suffix to match Zephyr convention. Never returns a transient value to
-external callers: while a transition is in flight, or after a fault
-latch, the result is defined by the open points below. Bounded by the
-per-step timeout like every other hardware-touching path (the "get"
-path is covered by the same timeout rule as "set").
+external callers: it reads `ctx.stable_state`, not `ctx.state`, so
+while a transition is in flight, or after a fault latch, it returns the
+last state that was fully reached — not the in-progress/latched
+transient. It is a plain spinlock-guarded read, not itself a
+hardware-touching path, so it is not subject to the per-step timeout.
 
 **Arguments:**
 
@@ -215,8 +224,8 @@ Returns an `enum pwr_profile_state` directly, not an errno.
 | `PWR_PROFILE_ACTIVE` | Module is in normal operation. |
 | `PWR_PROFILE_SLEEP` | Module is in the low-power state. |
 
-**Thread-safe:** YES (proposed) — reads `state` under the same lock that
-guards writes.
+**Thread-safe:** YES — reads `stable_state` under `ctx_lock`, the same
+spinlock that guards writes.
 
 #### `pwr_profile_suspend()`
 
@@ -238,7 +247,7 @@ unsafe in interrupt context). The button ISR therefore submits a
 |---|---|---|---|
 | — | — | `void` | n/a |
 
-**Return values (proposed errno contract):**
+**Return values:**
 
 | Macro | Meaning |
 |---|---|
@@ -248,8 +257,8 @@ unsafe in interrupt context). The button ISR therefore submits a
 | `-EAGAIN` | Recoverable failure (incl. timeout); all drivers rolled back, state reverted to `PWR_PROFILE_ACTIVE`. |
 | `-EIO` | Unrecoverable failure or rollback failed after retries; state latched at `PWR_PROFILE_SLEEPING`, `transition_failed == true`. Target must be reset. |
 
-**Thread-safe:** YES (proposed) — serialized against `resume()` and
-concurrent callers by the state lock. **Not ISR-safe.**
+**Thread-safe:** YES — serialized against `resume()` and concurrent
+callers by `transition_lock`. **Not ISR-safe.**
 
 #### `pwr_profile_resume()`
 
@@ -270,7 +279,7 @@ ISRs.
 |---|---|---|---|
 | — | — | `void` | n/a |
 
-**Return values (proposed errno contract):**
+**Return values:**
 
 | Macro | Meaning |
 |---|---|
@@ -280,7 +289,7 @@ ISRs.
 | `-EAGAIN` | Recoverable failure (incl. timeout); rolled back, state reverted to `PWR_PROFILE_SLEEP`. |
 | `-EIO` | Unrecoverable failure or rollback failed after retries; state latched at `PWR_PROFILE_WAKING`, `transition_failed == true`. Target must be reset. |
 
-**Thread-safe:** YES (proposed) — same as `suspend()`. **Not ISR-safe.**
+**Thread-safe:** YES — same as `suspend()`. **Not ISR-safe.**
 
 #### `pwr_profile_set_state()` (internal)
 
@@ -341,9 +350,9 @@ Terminal outcomes:
 
 | Name | Direction | Type | Boundary values |
 |---|---|---|---|
-| `target` | in | `enum pwr_profile_state` | `PWR_PROFILE_ACTIVE` or `PWR_PROFILE_SLEEP` only (proposed). Transient values are invalid input. |
+| `target` | in | `enum pwr_profile_state` | `PWR_PROFILE_ACTIVE` or `PWR_PROFILE_SLEEP` only. Transient values return `-EINVAL`. |
 
-**Return values (proposed errno contract):**
+**Return values:**
 
 | Macro | Meaning |
 |---|---|
@@ -354,28 +363,38 @@ Terminal outcomes:
 | `-EAGAIN` | Recoverable failure; rolled back, prior state restored. |
 | `-EIO` | Unrecoverable failure or fault latched. |
 
-**Thread-safe:** YES (proposed) — must run under the state lock; the
-lock is held across the whole transition so callers cannot interleave.
+**Thread-safe:** YES — `transition_lock` (a `k_mutex`, non-blocking
+`K_NO_WAIT` acquire so a concurrent caller gets `-EBUSY` instead of
+blocking) is held across the whole transition; `ctx_lock` (a
+`k_spinlock`) guards individual field reads/writes within it.
 **Not ISR-safe.** Internal; not callable from outside the core.
 
 ## Open points
 
-1. **`pwr_profile_set_state()` signature and bookkeeping** — direction is
-   set (stable-state-only `target`, transients sequenced internally) but
-   the exact signature and internal bookkeeping are not drafted in code.
-2. **Return-code contract** — the recoverable vs. unrecoverable
-   distinction between backend and core needs an exact negative-errno
-   convention. All macros above are **proposed**.
-3. **`max_retries` value** — example 3; to be a Kconfig constant.
-4. **Per-step timeout value** — example 100 ms; to be a Kconfig
-   constant. Applies to both "set" and "get" paths.
-5. **Thread-safety mechanism** — mutex vs. atomic for `state`,
-   `transition_failed`, `retry_count`; and the exact ISR → `k_work`
-   flow for the button handler. A v1 correctness requirement (REQ-15),
-   not deferred.
-6. **`struct pwr_profile_ctx` exposure** — whether `transition_failed`
+Resolved since the last pass (implemented in `pwr_profile_mgr.c`,
+`pwr_profile_backend.h`, `Kconfig`):
+
+- `pwr_profile_set_state()` signature/bookkeeping — `static int
+  pwr_profile_set_state(enum pwr_profile_state target)`, backed by
+  `struct pwr_profile_ctx` (documented above).
+- Return-code contract — the errno tables above are no longer proposed;
+  they match what the code returns.
+- `max_retries` — `CONFIG_PWR_PROFILE_MGR_MAX_RETRIES`, default 3.
+- Per-step timeout — `CONFIG_PWR_PROFILE_MGR_STEP_TIMEOUT_MS`, default
+  100 ms.
+- Thread-safety mechanism (core only) — `transition_lock` +
+  `ctx_lock`, as described above.
+
+Still open:
+
+1. **`struct pwr_profile_ctx` exposure** — whether `transition_failed`
    and `retry_count` are visible to callers (e.g. an extended query or
-   the `status` shell subcommand), and what `pwr_profile_get_state()`
-   returns while a fault is latched.
-7. **`status` shell subcommand** — recommended (prints current state),
+   the `status` shell subcommand). `pwr_profile_get_state()` itself is
+   resolved: it always returns `stable_state`, even while a fault is
+   latched.
+2. **`status` shell subcommand** — recommended (prints current state),
    not yet specified.
+3. **Button ISR → `k_work` flow (REQ-15)** — the core's locking is in
+   place and ready to be called from a `k_work` handler, but the actual
+   GPIO/EXTI ISR and work-item wiring don't exist yet; that's backend/
+   sample-app work, not core work.

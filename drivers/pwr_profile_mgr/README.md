@@ -36,31 +36,46 @@ points below are resolved.
 
 ## Status
 
-Design phase complete (per the source design discussion). Implementation
-not started. Hardware (STM32F407 Discovery) is physically available.
+Phase 0 (board/toolchain confirmation) complete: board is the STM32F407
+Discovery, accelerometer confirmed as the LIS3DSH by physical inspection,
+toolchain builds/flashes verified. Generic core (`pwr_profile_mgr.c/.h`,
+`pwr_profile_backend.h`, Kconfig, CMakeLists) is implemented and covered
+by a passing `native_sim` ztest suite (`tests/core/`) with a
+fault-injecting stub backend. Not yet started: the STM32F407 backend
+(`pwr_profile_mgr_stm32f4.c` — real Stop-mode entry/exit and the LED/
+UART/accelerometer driver callbacks), the button ISR/`k_work` wiring,
+the `state_manager` sample app, Devicetree overlay work, and RTC
+integration (phases 5–8 below).
 
 ## Open points to resolve before/during coding
 
 Tracked in full in `Design/DESIGN.md` §Open Points and
 `Architecture/ARCHITECTURE.md` §Open Points. Summary:
 
-| # | Open point | Resolve when |
+| # | Open point | Status |
 |---|---|---|
-| 1 | Accelerometer part (LIS302DL vs LIS3DSH) — physical board check | Phase 0 |
-| 2 | `pwr_profile_backend_ops` struct signatures | Scaffolding |
-| 3 | `pwr_profile_set_state()` exact signature/bookkeeping | Scaffolding |
-| 4 | Recoverable vs. unrecoverable error-code contract | Scaffolding |
-| 5 | `max_retries` value (example: 3) | Scaffolding, Kconfig |
-| 6 | Per-step timeout value (example: 100ms) | Scaffolding, Kconfig |
-| 7 | Thread-safety: ISR → `k_work` flow, state locking | Scaffolding (v1 correctness, not deferred) |
-| 8 | Kconfig / Devicetree overlay structure | Scaffolding |
-| 9 | File/directory layout | Scaffolding (see Architecture doc) |
-| 10 | CLI binary/app name (`state_manager` working name) | Any time before sample app |
-| 11 | `status` shell subcommand spec | Alongside suspend/resume |
+| 1 | Accelerometer part (LIS302DL vs LIS3DSH) — physical board check | Resolved: LIS3DSH |
+| 2 | `pwr_profile_backend_ops` struct signatures | Resolved: `pwr_profile_backend.h` |
+| 3 | `pwr_profile_set_state()` exact signature/bookkeeping | Resolved: `pwr_profile_mgr.c` |
+| 4 | Recoverable vs. unrecoverable error-code contract | Resolved: `pwr_profile_backend.h` comment block |
+| 5 | `max_retries` value | Resolved: `CONFIG_PWR_PROFILE_MGR_MAX_RETRIES`, default 3 |
+| 6 | Per-step timeout value | Resolved: `CONFIG_PWR_PROFILE_MGR_STEP_TIMEOUT_MS`, default 100ms |
+| 7 | Thread-safety: state locking (core) | Resolved: `transition_lock` + `ctx_lock` |
+| 7b | Thread-safety: ISR → `k_work` flow (button) | Open — needs the STM32F4 backend/sample-app slice |
+| 8 | Kconfig / Devicetree overlay structure | Kconfig resolved; DT overlay (accel/RTC) still open |
+| 9 | File/directory layout | Resolved (see Architecture doc) |
+| 10 | CLI binary/app name (`state_manager` working name) | Non-blocking default, kept |
+| 11 | `status` shell subcommand spec | Open — see Design/DESIGN.md open point 2 |
+
+Also open, not in the original table: the REQ-5 (CLI-triggered resume)
+vs. real STM32 Stop-mode tension — Stop mode halts the CPU, so a UART
+shell command cannot be typed or processed while actually asleep. This
+needs a user decision before the backend's `enter_sleep()`/resume path
+is finalized; see the project-level hard-stop list.
 
 ## Next step
 
-Phase 0: confirm board revision / onboard accelerometer part number by
-physical inspection, and confirm the Zephyr SDK/WSL toolchain builds
-and flashes a known-good baseline sample on this board. Then resolve
-open points 2, 3, 4, 7, 8, 9 as part of initial scaffolding.
+Implement `pwr_profile_mgr_stm32f4.c`: real Stop-mode entry/exit and the
+LED/UART/accelerometer backend driver callbacks, integrated one
+peripheral at a time per the phase sequencing below, plus the button
+ISR/`k_work` wiring (REQ-15) and the `state_manager` sample app.

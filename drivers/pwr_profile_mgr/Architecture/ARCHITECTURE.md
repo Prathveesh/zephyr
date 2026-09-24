@@ -97,9 +97,13 @@ conceptually identical to how Zephyr's own driver subsystems (e.g.
 implementation. The core calls through this struct without knowing
 which backend is on the other end; today there's only one backend
 (STM32F407), but a second board would only need to provide a second
-implementation of this same struct — no core code would change. The
-exact fields of this struct are not yet drafted; see
-[Open points](#open-points) item 1.
+implementation of this same struct — no core code would change. Fields
+are drafted and implemented in `pwr_profile_backend.h`: `enter_sleep()`/
+`exit_sleep()`, and a `drivers[]` table of `struct pwr_profile_drv`
+(`suspend`/`resume`/`rollback`, one entry per integrated peripheral) so
+the core's rollback-walk can iterate it generically. The board instance
+itself (`pwr_profile_mgr_stm32f4.c`'s `pwr_profile_backend`) does not
+exist yet — see [Open points](#open-points) item 1.
 
 **Box 3 — `pwr_profile_mgr_stm32f4` (backend), the bottom layer.**
 This is where all the STM32-specific work actually happens (REQ-14):
@@ -198,13 +202,12 @@ suspend) is wrapped into the module in Phase 4.
 
 All architecture-level open points, in one place:
 
-1. **`pwr_profile_backend_ops` struct** (§1) — exact function-pointer
-   signatures not yet drafted. Must cover at minimum: `enter_sleep()` /
-   `exit_sleep()`; per-driver `suspend()`/`resume()`/`rollback()` for
-   LED, UART shell, accelerometer (likely as an array/table of driver
-   descriptors so the core's rollback-walk can iterate generically);
-   and a return convention that encodes the recoverable-vs-unrecoverable
-   distinction from Design/DESIGN.md.
+1. **`pwr_profile_backend_ops` struct** (§1) — the struct itself is
+   drafted and implemented (`pwr_profile_backend.h`), including the
+   recoverable-vs-unrecoverable return convention. Still open: the
+   actual `pwr_profile_mgr_stm32f4.c` instance that fills it in for
+   real hardware (Stop-mode entry/exit, LED/UART/accelerometer
+   suspend/resume/rollback) does not exist yet.
 2. **Module placement** (§2) — layout inside the folder is decided
    (see §2). Still open: whether this ships as an in-tree `drivers/`
    module (current location) or is better suited as `subsys/pm/` or an
