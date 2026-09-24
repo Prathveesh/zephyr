@@ -398,3 +398,35 @@ Still open:
    place and ready to be called from a `k_work` handler, but the actual
    GPIO/EXTI ISR and work-item wiring don't exist yet; that's backend/
    sample-app work, not core work.
+
+## REQ-5 vs. real STM32 Stop mode (resolved 2026-09-24)
+
+**The tension:** real STM32 Stop mode halts the CPU clock entirely,
+including the USART peripheral, so a UART byte cannot be received or
+decoded while the board is actually asleep — REQ-5 ("CLI-triggered
+resume") cannot mean "type `resume` in the shell and have it parsed
+while in Stop mode," taken literally.
+
+**User-confirmed resolution:** the STM32F4 backend configures the debug
+USART's RX pin as a plain GPIO/EXTI line — independent of the USART
+peripheral itself, the same mechanism already used for the button
+(EXTI0/PA0, REQ-2/REQ-4) — so any falling edge (the start bit of an
+incoming byte) wakes the CPU from Stop mode. The byte that caused the
+edge is lost, because the USART was unclocked and never captured it; on
+wake, the shell backend's resume path prints a note that the triggering
+keystroke was not parsed, and the user re-issues `resume` normally now
+that the CPU is running and the USART is live again. This is a literal,
+physically real "a CLI keystroke causes wake" path — REQ-5 is satisfied
+by the RX-edge-wakes-CPU mechanism plus a genuine `resume` command
+completing the transition once the CPU is back up, not by redefining
+REQ-5 to only apply pre-Stop-mode-entry or only on `native_sim`.
+
+Implementation implications for the STM32F4 backend (not yet written):
+- The UART RX EXTI line and the button EXTI0 line both feed the same
+  deferred `k_work` → `pwr_profile_resume()` path (REQ-6, REQ-15) —
+  the core has no visibility into which one fired.
+- `enter_sleep()` must configure the RX pin's EXTI trigger (and restore
+  normal USART RX pin muxing) as part of Stop-mode entry/exit,
+  verified against `/home/pns/DS_dm00037051.pdf`'s GPIO/EXTI and USART
+  chapters and the STM32F4 Discovery board's actual USART/pin wiring —
+  not assumed from general STM32 recollection.
