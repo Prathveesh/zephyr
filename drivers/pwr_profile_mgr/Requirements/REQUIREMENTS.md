@@ -51,6 +51,16 @@ used.
 The onboard LED shall stop toggling while in `Sleep` and shall resume
 at the correct blink phase upon wake.
 
+**REQ-21 — Multi-LED state indication.**
+Extends REQ-9 to all four onboard user LEDs, added after REQ-9's
+single-LED behavior was validated on hardware: while `Active`, the
+green, orange, and blue LEDs (`led0`/`led1`/`led3`) blink together;
+while `Sleep`, all three are dark and the red LED (`led2`) is solid on
+as a state indicator. REQ-9's phase-preservation requirement (stop
+toggling in Sleep, resume at the correct phase) applies to the three
+blinking LEDs; the red LED has no blink phase of its own to preserve —
+it's simply on for the duration of `Sleep`.
+
 **REQ-10 — UART shell suspend/resume behavior.**
 The UART shell shall be silent while in `Sleep`. Upon resume, it shall
 reflect application state retained from before suspend (e.g. a counter

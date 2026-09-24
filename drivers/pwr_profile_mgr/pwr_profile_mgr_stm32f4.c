@@ -38,7 +38,13 @@ LOG_MODULE_REGISTER(pwr_profile_mgr_stm32f4, CONFIG_PWR_PROFILE_MGR_LOG_LEVEL);
 
 #define LED_PERIOD_MS 300U
 
-static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
+/* Active: led0/led1/led3 (green/orange/blue) blink together.
+ * Sleep: led2 (red) solid on, the other three dark. REQ-21.
+ */
+static const struct gpio_dt_spec led_green = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
+static const struct gpio_dt_spec led_orange = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);
+static const struct gpio_dt_spec led_red = GPIO_DT_SPEC_GET(DT_ALIAS(led2), gpios);
+static const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(DT_ALIAS(led3), gpios);
 static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET(DT_ALIAS(sw0), gpios);
 
 static struct k_timer led_timer;
@@ -51,14 +57,21 @@ static struct k_work button_work;
 
 static const struct pm_state_info *stop_state;
 
-/* --- LED driver: suspend/resume/rollback (REQ-9) --- */
+/* --- LED driver: suspend/resume/rollback (REQ-9, REQ-21) --- */
+
+static void active_leds_set(int value)
+{
+	gpio_pin_set_dt(&led_green, value);
+	gpio_pin_set_dt(&led_orange, value);
+	gpio_pin_set_dt(&led_blue, value);
+}
 
 static void led_timer_handler(struct k_timer *timer)
 {
 	ARG_UNUSED(timer);
 
 	led_on = !led_on;
-	gpio_pin_set_dt(&led, led_on);
+	active_leds_set(led_on);
 }
 
 static int led_suspend(k_timeout_t timeout)
@@ -71,7 +84,8 @@ static int led_suspend(k_timeout_t timeout)
 		led_running = false;
 	}
 
-	gpio_pin_set_dt(&led, 0);
+	active_leds_set(0);
+	gpio_pin_set_dt(&led_red, 1);
 
 	return 0;
 }
@@ -83,7 +97,8 @@ static int led_resume(k_timeout_t timeout)
 	if (!led_running) {
 		uint32_t first_ms = (led_remaining_ms > 0) ? led_remaining_ms : LED_PERIOD_MS;
 
-		gpio_pin_set_dt(&led, led_on);
+		gpio_pin_set_dt(&led_red, 0);
+		active_leds_set(led_on);
 		k_timer_start(&led_timer, K_MSEC(first_ms), K_MSEC(LED_PERIOD_MS));
 		led_running = true;
 	}
@@ -166,14 +181,20 @@ static int pwr_profile_mgr_stm32f4_init(void)
 {
 	int rc;
 
-	if (!gpio_is_ready_dt(&led) || !gpio_is_ready_dt(&button)) {
+	if (!gpio_is_ready_dt(&led_green) || !gpio_is_ready_dt(&led_orange) ||
+	    !gpio_is_ready_dt(&led_red) || !gpio_is_ready_dt(&led_blue) ||
+	    !gpio_is_ready_dt(&button)) {
 		LOG_ERR("LED or button GPIO device not ready");
 		return -ENODEV;
 	}
 
-	rc = gpio_pin_configure_dt(&led, GPIO_OUTPUT_INACTIVE);
-	if (rc != 0) {
-		return rc;
+	const struct gpio_dt_spec *leds[] = {&led_green, &led_orange, &led_red, &led_blue};
+
+	for (size_t i = 0; i < ARRAY_SIZE(leds); i++) {
+		rc = gpio_pin_configure_dt(leds[i], GPIO_OUTPUT_INACTIVE);
+		if (rc != 0) {
+			return rc;
+		}
 	}
 
 	rc = gpio_pin_configure_dt(&button, GPIO_INPUT);
@@ -202,7 +223,7 @@ static int pwr_profile_mgr_stm32f4_init(void)
 
 	k_timer_init(&led_timer, led_timer_handler, NULL);
 	led_on = true;
-	gpio_pin_set_dt(&led, 1);
+	active_leds_set(1);
 	k_timer_start(&led_timer, K_MSEC(LED_PERIOD_MS), K_MSEC(LED_PERIOD_MS));
 	led_running = true;
 

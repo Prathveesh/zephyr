@@ -43,12 +43,11 @@ fault-injecting stub backend.
 `pwr_profile_mgr_stm32f4.c` (the real board backend) exists and is
 validated end-to-end on hardware: real Stop-mode entry/exit (via
 Zephyr's own `PM_STATE_SUSPEND_TO_IDLE`, see Design/DESIGN.md), a
-phase-preserving LED driver (REQ-9), and the button ISR → `k_work` →
-`pwr_profile_suspend()`/`resume()` wiring (REQ-2, REQ-4, REQ-15). The
-`state_manager` sample app (v1: button-only, no CLI) builds, flashes,
-and was confirmed by the user on real hardware: LED blinks, stops on
-button press (real Stop mode), resumes at the same blink phase on a
-second press.
+phase-preserving four-LED driver (REQ-9, REQ-21 — green/orange/blue
+blink together in Active, red solid on in Sleep), and the button ISR →
+`k_work` → `pwr_profile_suspend()`/`resume()` wiring (REQ-2, REQ-4,
+REQ-15). The `state_manager` sample app (v1: button-only, no CLI)
+builds, flashes, and was confirmed by the user on real hardware.
 
 Not yet started: UART shell driver (REQ-10 — needs a validation plan,
 see below), accelerometer driver (REQ-11), RTC wakeup timer (REQ-12),

@@ -428,18 +428,23 @@ still returns promptly (well within `STEP_TIMEOUT`) with `stable_state
 == PWR_PROFILE_SLEEP`, and the CPU physically sleeps once nothing else
 is runnable, which in this single-purpose module is immediately after.
 
-**LED driver (REQ-9) preserves blink phase, not just on/off state.** A
-`k_timer` drives periodic toggling. `suspend()` calls
-`k_timer_remaining_get()` *before* stopping the timer, saving how far
-through the current half-period it was; `resume()` restarts the timer
-with that saved remainder as a one-shot first expiry, then falls back
-to the normal period — so the blink continues from where it left off
-rather than restarting fresh. The LED is driven dark during Sleep
-(matches what was validated on hardware with the user, not left at
-its last level) and restored to its last on/off level immediately on
-resume, before the timer restarts. `suspend()`/`resume()` are both
-idempotent (guarded by a `led_running` flag), so `rollback()` can call
-either one unconditionally depending on which direction it's undoing.
+**LED driver (REQ-9, REQ-21) preserves blink phase, not just on/off
+state, and drives all four onboard LEDs as a single state indicator.**
+A `k_timer` drives periodic toggling of the three "active" LEDs
+(green/orange/blue — `led0`/`led1`/`led3`) together, in sync.
+`suspend()` calls `k_timer_remaining_get()` *before* stopping the
+timer, saving how far through the current half-period it was;
+`resume()` restarts the timer with that saved remainder as a one-shot
+first expiry, then falls back to the normal period — so the blink
+continues from where it left off rather than restarting fresh. On
+`suspend()`, the three active LEDs go dark and the red LED (`led2`)
+turns solid on; on `resume()`, red turns off and the three active LEDs
+are restored to their last on/off level immediately, before the timer
+restarts. `suspend()`/`resume()` are both idempotent (guarded by a
+`led_running` flag), so `rollback()` can call either one
+unconditionally depending on which direction it's undoing. Validated
+on hardware with the user for both the single-LED (REQ-9) and
+four-LED (REQ-21) versions.
 
 ## REQ-5 vs. real STM32 Stop mode (parked with REQ-5, 2026-09-24)
 
