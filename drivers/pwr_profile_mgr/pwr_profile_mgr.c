@@ -155,7 +155,6 @@ static int pwr_profile_set_state(enum pwr_profile_state target)
 			ctx.state = target;
 			ctx.stable_state = target;
 		}
-		LOG_INF("now %s", (target == PWR_PROFILE_SLEEP) ? "SLEEP" : "ACTIVE");
 		goto out;
 	}
 

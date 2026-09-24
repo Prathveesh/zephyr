@@ -7,42 +7,6 @@ generic SoC-agnostic core and a board-specific backend.
 Portfolio project — see `Requirements/`, `Design/`, and `Architecture/`
 for the full design record alongside the implementation.
 
-## Viewing live debug logs (no UART hardware)
-
-This board's ST-LINK VCP is not wired to a UART (see Open points
-below), and no external USB-TTL adapter is used, so `state_manager`
-logs over **RTT** instead — a RAM ring buffer the debug probe reads
-over the same SWD connection used for flashing. `pwr_profile_mgr.c`
-logs `now SLEEP` / `now ACTIVE` on every successful transition
-(`LOG_INF`), so this is the live way to watch state changes as they
-happen.
-
-1. Find `_SEGGER_RTT`'s address in the build (changes if code layout
-   changes — re-check after any rebuild):
-   ```bash
-   arm-zephyr-eabi-nm build_state_mgr/zephyr/zephyr.elf | grep _SEGGER_RTT
-   ```
-2. In one terminal, start OpenOCD with the RTT server (stays running —
-   don't add `exit`/`shutdown`):
-   ```bash
-   openocd -s <board>/support -s <sdk>/usr/share/openocd/scripts \
-       -f board/stm32f4discovery.cfg \
-       -c 'reset_config srst_only connect_assert_srst' \
-       -c 'init' -c 'reset halt' \
-       -c 'rtt setup 0x20000410 64 {SEGGER RTT}' \
-       -c 'rtt start' -c 'resume' \
-       -c 'rtt server start 9090 0'
-   ```
-3. In a second terminal: `telnet localhost 9090` (or `nc localhost
-   9090`). Press the user button on the board and watch `now SLEEP` /
-   `now ACTIVE` appear live.
-
-`rtt setup` needs the target **halted** to reliably find the control
-block (found consistently after `reset halt`; was flaky after `reset
-run`) — `resume` afterward lets it run normally while OpenOCD keeps
-reading the buffer in the background. `reset_config connect_assert_srst`
-is still needed for the same reason noted below (WFI/idle + DBGMCU).
-
 ## Docs in this folder
 
 - [`Requirements/REQUIREMENTS.md`](Requirements/REQUIREMENTS.md) — what the module must do, naming rules, explicitly deferred scope.
@@ -127,11 +91,7 @@ Also open, not in the original table:
   so reading real UART output for REQ-10 will need either an external
   USB-TTL adapter on PA2(TX)/PA3(RX)/GND, or another plan, decided
   before Phase 5's UART integration slice. Not blocking now since LED/
-  button/Stop-mode work doesn't need it. **Live debug logging now uses
-  RTT instead** (see above) for general visibility (state transitions)
-  — this doesn't substitute for REQ-10 itself, which is specifically
-  about the UART peripheral's own suspend/resume/silence behavior, not
-  about having *some* log channel.
+  button/Stop-mode work doesn't need it.
 - **OpenOCD needs `reset_config connect_assert_srst`** to connect
   reliably on this setup — plain `west flash --runner openocd` /
   `west debug --runner openocd` intermittently fail to examine/halt the
