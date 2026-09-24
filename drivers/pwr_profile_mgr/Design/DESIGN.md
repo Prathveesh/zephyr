@@ -446,6 +446,25 @@ unconditionally depending on which direction it's undoing. Validated
 on hardware with the user for both the single-LED (REQ-9) and
 four-LED (REQ-21) versions.
 
+## Live state-transition logging over RTT (added 2026-09-24)
+
+`pwr_profile_mgr.c`'s `set_state()` logs `LOG_INF("now %s", ...)` on
+every successful transition (`ACTIVE`/`SLEEP`) — generic core code, not
+backend-specific, since it's describing the same state change REQ-6
+already unifies across trigger sources. The board-level question is
+how the *user* sees it: this board's ST-LINK VCP has no UART bridge
+(see README's "ST-LINK VCP is not wired" note), so `state_manager`'s
+`prj.conf` routes logging over **RTT** instead
+(`CONFIG_USE_SEGGER_RTT`, `CONFIG_LOG_BACKEND_RTT`) — a RAM ring buffer
+the debug probe reads in the background over the same SWD connection
+already used for flashing, no extra hardware. `USE_SEGGER_RTT` on
+STM32 auto-selects `STM32_ENABLE_DEBUG_SLEEP_STOP`, which keeps DBGMCU
+debug clocks alive during Sleep/Stop specifically so RTT keeps working
+then too — this doesn't defeat real Stop mode (the core clock still
+gates, execution still halts), only the debug-support clock domain
+stays up. See README for the exact commands to view it live
+(`openocd`'s `rtt server`, then `telnet`/`nc`).
+
 ## REQ-5 vs. real STM32 Stop mode (parked with REQ-5, 2026-09-24)
 
 **Status:** REQ-5 (CLI-triggered resume) is deferred out of v1 scope
