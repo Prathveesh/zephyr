@@ -103,20 +103,31 @@ are drafted and implemented in `pwr_profile_backend.h`: `enter_sleep()`/
 `exit_sleep()`, and a `drivers[]` table of `struct pwr_profile_drv`
 (`suspend`/`resume`/`rollback`, one entry per integrated peripheral) so
 the core's rollback-walk can iterate it generically. The board instance
-itself (`pwr_profile_mgr_stm32f4.c`'s `pwr_profile_backend`) does not
-exist yet — see [Open points](#open-points) item 1.
+(`pwr_profile_mgr_stm32f4.c`'s `pwr_profile_backend`) exists for LED +
+Stop mode; UART and accelerometer entries land in later slices.
 
 **Box 3 — `pwr_profile_mgr_stm32f4` (backend), the bottom layer.**
 This is where all the STM32-specific work actually happens (REQ-14):
-- `enter_sleep()` / `exit_sleep()` — the actual STM32 Stop-mode entry
-  and exit sequence (register writes, HAL/LL calls).
-- Three driver-specific callback groups — LED, UART shell, and
-  accelerometer — each exposing `suspend()`, `resume()`, and
-  `rollback()`. These map directly to the three peripheral integrations
+- `enter_sleep()` / `exit_sleep()` — real Stop-mode entry/exit, but
+  built on Zephyr's own STM32F4 PM subsystem
+  (`soc/st/stm32/stm32f4x/power.c`'s `PM_STATE_SUSPEND_TO_IDLE`) rather
+  than hand-rolled PWR/RCC register writes — see Design/DESIGN.md for
+  why and how. `enter_sleep()` only arms the state
+  (`pm_state_force()`); the actual WFI halt and clock restoration
+  happen later, naturally, via Zephyr's own idle-thread PM hooks, so
+  `exit_sleep()` has nothing left to do.
+- Driver-specific callback groups — LED implemented (v1), UART shell
+  and accelerometer to follow — each exposing `suspend()`, `resume()`,
+  and `rollback()`. These map directly to the peripheral integrations
   required by REQ-9, REQ-10, and REQ-11. The core's rollback-walk logic
-  (Design/DESIGN.md §3) iterates over these three sets generically; it
-  doesn't have LED/UART/accelerometer-specific logic itself, since that
-  would break the SoC-agnostic boundary at Arrow 2.
+  (Design/DESIGN.md §3) iterates over this set generically; it doesn't
+  have LED/UART/accelerometer-specific logic itself, since that would
+  break the SoC-agnostic boundary at Arrow 2.
+- The button ISR → `k_work` → `pwr_profile_suspend()`/`resume()` wiring
+  (REQ-15) also lives here, since the button pin (PA0/EXTI0) is
+  board-specific. It's not part of `pwr_profile_backend_ops` — it's a
+  trigger source, calling the same public API Box 1 calls, not a
+  backend callback the core invokes.
 
 **What the diagram deliberately does not show:** the RTC wakeup timer
 (REQ-12) and the button GPIO/EXTI interrupt are wake *sources*, not
@@ -142,7 +153,7 @@ drivers/pwr_profile_mgr/
 ├── pwr_profile_mgr.h                # public API + enums
 ├── pwr_profile_mgr.c                # generic core: public API, set_state()
 ├── pwr_profile_backend.h            # private: backend ops / driver table
-├── pwr_profile_mgr_stm32f4.c        # board backend (planned)
+├── pwr_profile_mgr_stm32f4.c        # board backend: Stop mode + LED driver + button (v1)
 ├── README.md
 ├── Requirements/REQUIREMENTS.md
 ├── Design/DESIGN.md
@@ -150,7 +161,7 @@ drivers/pwr_profile_mgr/
 ├── tests/
 │   └── core/                        # ztest on native_sim, stub backend
 └── samples/
-    └── state_manager/               # shell sample app (planned, name TBD)
+    └── state_manager/               # v1: button-only demo; CLI verbs deferred (REQ-20)
 ```
 
 ### Mapping to the in-tree Zephyr layout
@@ -203,12 +214,16 @@ suspend) is wrapped into the module in Phase 4.
 
 All architecture-level open points, in one place:
 
-1. **`pwr_profile_backend_ops` struct** (§1) — the struct itself is
-   drafted and implemented (`pwr_profile_backend.h`), including the
-   recoverable-vs-unrecoverable return convention. Still open: the
-   actual `pwr_profile_mgr_stm32f4.c` instance that fills it in for
-   real hardware (Stop-mode entry/exit, LED/UART/accelerometer
-   suspend/resume/rollback) does not exist yet.
+1. **`pwr_profile_backend_ops` struct** (§1) — resolved. The struct is
+   drafted and implemented (`pwr_profile_backend.h`), and
+   `pwr_profile_mgr_stm32f4.c` now provides the real instance: real
+   Stop-mode entry (`pm_state_force()` against Zephyr's own
+   `PM_STATE_SUSPEND_TO_IDLE`, not hand-rolled PWR register writes —
+   see Design/DESIGN.md) and a phase-preserving LED driver
+   (suspend/resume/rollback), validated on hardware (button-triggered
+   suspend/resume, LED stops and resumes at the correct blink phase).
+   UART and accelerometer driver entries are not in the `drivers[]`
+   table yet — later slices (Phase 5).
 2. **Module placement** (§2) — layout inside the folder is decided
    (see §2). Still open: whether this ships as an in-tree `drivers/`
    module (current location) or is better suited as `subsys/pm/` or an

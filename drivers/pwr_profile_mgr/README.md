@@ -5,10 +5,7 @@ Custom Zephyr module implementing a two-state power-profile manager
 generic SoC-agnostic core and a board-specific backend.
 
 Portfolio project — see `Requirements/`, `Design/`, and `Architecture/`
-for the full design record before any implementation code is written.
-Source (`pwr_profile_mgr.c`, backend, Kconfig, CMakeLists.txt, sample
-app) is added once Phase 0 (board/toolchain confirmation) and the open
-points below are resolved.
+for the full design record alongside the implementation.
 
 ## Docs in this folder
 
@@ -36,16 +33,27 @@ points below are resolved.
 
 ## Status
 
-Phase 0 (board/toolchain confirmation) complete: board is the STM32F407
-Discovery, accelerometer confirmed as the LIS3DSH by physical inspection,
-toolchain builds/flashes verified. Generic core (`pwr_profile_mgr.c/.h`,
+Phases 0–4 complete. Board is the STM32F407 Discovery, accelerometer
+confirmed as the LIS3DSH by physical inspection, toolchain builds/
+flashes verified. Generic core (`pwr_profile_mgr.c/.h`,
 `pwr_profile_backend.h`, Kconfig, CMakeLists) is implemented and covered
 by a passing `native_sim` ztest suite (`tests/core/`) with a
-fault-injecting stub backend. Not yet started: the STM32F407 backend
-(`pwr_profile_mgr_stm32f4.c` — real Stop-mode entry/exit and the LED/
-UART/accelerometer driver callbacks), the button ISR/`k_work` wiring,
-the `state_manager` sample app, Devicetree overlay work, and RTC
-integration (phases 5–8 below).
+fault-injecting stub backend.
+
+`pwr_profile_mgr_stm32f4.c` (the real board backend) exists and is
+validated end-to-end on hardware: real Stop-mode entry/exit (via
+Zephyr's own `PM_STATE_SUSPEND_TO_IDLE`, see Design/DESIGN.md), a
+phase-preserving LED driver (REQ-9), and the button ISR → `k_work` →
+`pwr_profile_suspend()`/`resume()` wiring (REQ-2, REQ-4, REQ-15). The
+`state_manager` sample app (v1: button-only, no CLI) builds, flashes,
+and was confirmed by the user on real hardware: LED blinks, stops on
+button press (real Stop mode), resumes at the same blink phase on a
+second press.
+
+Not yet started: UART shell driver (REQ-10 — needs a validation plan,
+see below), accelerometer driver (REQ-11), RTC wakeup timer (REQ-12),
+Devicetree overlay work for those, and repeated-cycle validation
+(phases 5–8 below, minus the deferred CLI trigger).
 
 ## Open points to resolve before/during coding
 
@@ -61,7 +69,7 @@ Tracked in full in `Design/DESIGN.md` §Open Points and
 | 5 | `max_retries` value | Resolved: `CONFIG_PWR_PROFILE_MGR_MAX_RETRIES`, default 3 |
 | 6 | Per-step timeout value | Resolved: `CONFIG_PWR_PROFILE_MGR_STEP_TIMEOUT_MS`, default 100ms |
 | 7 | Thread-safety: state locking (core) | Resolved: `transition_lock` + `ctx_lock` |
-| 7b | Thread-safety: ISR → `k_work` flow (button) | Open — needs the STM32F4 backend/sample-app slice |
+| 7b | Thread-safety: ISR → `k_work` flow (button) | Resolved: `pwr_profile_mgr_stm32f4.c`, validated on hardware |
 | 8 | Kconfig / Devicetree overlay structure | Kconfig resolved; DT overlay (accel/RTC) still open |
 | 9 | File/directory layout | Resolved (see Architecture doc) |
 | 10 | CLI binary/app name (`state_manager` working name) | Non-blocking default, kept; CLI itself deferred (REQ-20) |
@@ -95,10 +103,9 @@ Also open, not in the original table:
 
 ## Next step
 
-Implement `pwr_profile_mgr_stm32f4.c`: real Stop-mode entry/exit
-(leveraging Zephyr's own STM32F4 PM subsystem —
-`PM_STATE_SUSPEND_TO_IDLE` / `pm_state_force()` — rather than hand-rolled
-PWR register writes) and the LED backend driver callback, plus the
-button ISR/`k_work` wiring (REQ-15), integrated one peripheral at a time
-per the phase sequencing above. UART and accelerometer follow once LED/
-button/Stop-mode is validated on hardware.
+Decide the REQ-10 (UART shell) validation plan given the ST-LINK VCP
+limitation above (no external hardware wanted), then integrate the
+next peripheral. RTC (REQ-12) may be worth pulling forward before
+UART/accelerometer, since it's already wired as Zephyr's PM system-timer
+companion at the SoC level — using it as an explicit second wake source
+is likely the smallest next slice.

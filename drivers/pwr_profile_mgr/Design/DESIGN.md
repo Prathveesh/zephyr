@@ -384,6 +384,11 @@ Resolved since the last pass (implemented in `pwr_profile_mgr.c`,
   100 ms.
 - Thread-safety mechanism (core only) — `transition_lock` +
   `ctx_lock`, as described above.
+- Button ISR → `k_work` flow (REQ-15) — implemented in
+  `pwr_profile_mgr_stm32f4.c`: the GPIO/EXTI0 ISR only calls
+  `k_work_submit()`; the work handler (thread context) reads
+  `pwr_profile_get_state()` and calls `pwr_profile_suspend()` or
+  `pwr_profile_resume()` accordingly. Validated on hardware.
 
 Still open:
 
@@ -391,13 +396,50 @@ Still open:
    and `retry_count` are visible to callers (e.g. an extended query or
    the `status` shell subcommand). `pwr_profile_get_state()` itself is
    resolved: it always returns `stable_state`, even while a fault is
-   latched.
-2. **`status` shell subcommand** — recommended (prints current state),
-   not yet specified.
-3. **Button ISR → `k_work` flow (REQ-15)** — the core's locking is in
-   place and ready to be called from a `k_work` handler, but the actual
-   GPIO/EXTI ISR and work-item wiring don't exist yet; that's backend/
-   sample-app work, not core work.
+   latched. Deferred with the CLI trigger (REQ-20) — no `status`
+   subcommand exists yet to need it.
+2. **`status` shell subcommand** — deferred with CLI trigger (REQ-20),
+   not a v1 concern.
+
+## STM32F4 backend: Stop-mode entry/exit and LED driver (implemented 2026-09-24)
+
+**`enter_sleep()`/`exit_sleep()` build on Zephyr's own STM32F4 PM
+subsystem, not hand-rolled PWR/RCC register writes.**
+`soc/st/stm32/stm32f4x/power.c` already implements real Stop-mode entry
+for `PM_STATE_SUSPEND_TO_IDLE` (`LL_PWR_SetPowerMode(LL_PWR_MODE_STOP_LPREGU)`
++ deep-sleep + WFI), tied to the "stop" state in
+`dts/arm/st/f4/stm32f4.dtsi`'s `power-states` node. Reusing this instead
+of writing new register-level code is both correct per the "no
+hallucination, verify against real Zephyr source" rule and avoids
+duplicating already-verified upstream logic.
+
+`enter_sleep()` only calls `pm_state_force(0, stop_state)` — it does
+**not** itself block until the CPU wakes. The actual WFI halt happens
+later, naturally: once `forward()` finishes and the calling thread (the
+button's `k_work` handler) has nothing left to do, it becomes idle, and
+Zephyr's own idle thread — seeing the forced state — performs the real
+Stop-mode entry. Wake, when it comes (button EXTI0), is handled by
+Zephyr's own `pm_state_exit_post_ops()` (clock restoration) *before*
+any wake-source ISR runs, so `exit_sleep()` has nothing left to do and
+is a no-op. This means the actual CPU halt happens outside the
+`pwr_profile_suspend()` call's own execution — a deliberate consequence
+of Zephyr's idle-driven PM model, not a gap: `pwr_profile_suspend()`
+still returns promptly (well within `STEP_TIMEOUT`) with `stable_state
+== PWR_PROFILE_SLEEP`, and the CPU physically sleeps once nothing else
+is runnable, which in this single-purpose module is immediately after.
+
+**LED driver (REQ-9) preserves blink phase, not just on/off state.** A
+`k_timer` drives periodic toggling. `suspend()` calls
+`k_timer_remaining_get()` *before* stopping the timer, saving how far
+through the current half-period it was; `resume()` restarts the timer
+with that saved remainder as a one-shot first expiry, then falls back
+to the normal period — so the blink continues from where it left off
+rather than restarting fresh. The LED is driven dark during Sleep
+(matches what was validated on hardware with the user, not left at
+its last level) and restored to its last on/off level immediately on
+resume, before the timer restarts. `suspend()`/`resume()` are both
+idempotent (guarded by a `led_running` flag), so `rollback()` can call
+either one unconditionally depending on which direction it's undoing.
 
 ## REQ-5 vs. real STM32 Stop mode (parked with REQ-5, 2026-09-24)
 
